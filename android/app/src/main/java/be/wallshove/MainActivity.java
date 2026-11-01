@@ -13,6 +13,7 @@ import android.view.WindowInsetsController;
 import android.view.WindowManager;
 import android.webkit.WebResourceError;
 import android.webkit.WebResourceRequest;
+import android.webkit.WebResourceResponse;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
@@ -51,6 +52,15 @@ public class MainActivity extends Activity {
             @Override
             public void onReceivedError(WebView view, WebResourceRequest req, WebResourceError err) {
                 if (req.isForMainFrame() && !fellBack) {
+                    fellBack = true;
+                    view.loadUrl(OFFLINE_URL);
+                }
+            }
+
+            @Override
+            public void onReceivedHttpError(WebView view, WebResourceRequest req, WebResourceResponse resp) {
+                // GitHub Pages not live yet (404) or down: play the bundled copy instead.
+                if (req.isForMainFrame() && !fellBack && resp.getStatusCode() >= 400) {
                     fellBack = true;
                     view.loadUrl(OFFLINE_URL);
                 }
