@@ -1,0 +1,43 @@
+plugins {
+    id 'com.android.application'
+}
+
+def runNumber = (System.getenv("GITHUB_RUN_NUMBER") ?: "1") as int
+
+android {
+    namespace 'be.wallshove'
+    compileSdk 34
+
+    defaultConfig {
+        applicationId 'be.wallshove'
+        minSdk 26
+        targetSdk 34
+        versionCode runNumber
+        versionName "1.0.${runNumber}"
+    }
+
+    // Fixed key so every new build installs over the previous one.
+    signingConfigs {
+        fixed {
+            storeFile file('wallshove.keystore')
+            storePassword 'wallshove'
+            keyAlias 'wallshove'
+            keyPassword 'wallshove'
+        }
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+            signingConfig signingConfigs.fixed
+        }
+        debug {
+            signingConfig signingConfigs.fixed
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+}
