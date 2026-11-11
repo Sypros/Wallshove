@@ -76,6 +76,7 @@ kbd{font-family:var(--mono);font-size:11px;border:1px solid var(--line);border-b
 .pad [data-d="left"]{grid-column:1;grid-row:2}
 .pad [data-d="right"]{grid-column:3;grid-row:2}
 .pad [data-d="down"]{grid-column:2;grid-row:3}
+.pad #pullBtn{grid-column:2;grid-row:2;font-family:var(--mono);font-size:12px;font-weight:600;color:var(--block-hi);border-color:var(--block-lo)}
 @media (pointer:coarse){ .pad{display:grid} .kb{display:none} }
 @media (max-width:480px){ .brand{display:none} .top{justify-content:space-between} .hud{gap:4px 12px} }
 @media (prefers-reduced-motion:reduce){ .banner{transition:none} }
@@ -103,6 +104,7 @@ kbd{font-family:var(--mono);font-size:11px;border:1px solid var(--line);border-b
       <button type="button" data-d="left" aria-label="Left">◀</button>
       <button type="button" data-d="right" aria-label="Right">▶</button>
       <button type="button" data-d="down" aria-label="Down">▼</button>
+      <button type="button" id="pullBtn" aria-label="Pull block">Pull</button>
     </div>
     <div class="overlay" id="overlay"><div class="card" id="card"></div></div>
   </main>
@@ -113,10 +115,10 @@ kbd{font-family:var(--mono);font-size:11px;border:1px solid var(--line);border-b
 const BUILD = '__BUILD__';
 const DIRS = [[1,0],[-1,0],[0,1],[0,-1]];
 const MOVES = {up: [0,-1], left: [-1,0], down: [0,1], right: [1,0]};
-const ACTIONS = [['up', 'Move up'], ['left', 'Move left'], ['down', 'Move down'], ['right', 'Move right'], ['pause', 'Pause']];
-const PRESETS = {azerty: {up: 'z', left: 'q', down: 's', right: 'd', pause: 'p'}, qwerty: {up: 'w', left: 'a', down: 's', right: 'd', pause: 'p'}};
+const ACTIONS = [['up', 'Move up'], ['left', 'Move left'], ['down', 'Move down'], ['right', 'Move right'], ['pull', 'Pull block'], ['pause', 'Pause']];
+const PRESETS = {azerty: {up: 'z', left: 'q', down: 's', right: 'd', pull: ' ', pause: 'p'}, qwerty: {up: 'w', left: 'a', down: 's', right: 'd', pull: ' ', pause: 'p'}};
 let binds = {...PRESETS.azerty};
-try { const saved = JSON.parse(localStorage.getItem('wallshove-keys') || 'null'); if (saved && ACTIONS.every(([a]) => typeof saved[a] === 'string')) binds = saved; } catch(e) {}
+try { const saved = JSON.parse(localStorage.getItem('wallshove-keys') || 'null'); if (saved && typeof saved === 'object') binds = {...binds, ...saved}; } catch(e) {}
 let KEYS = {};
 function buildKeys() {
   // Arrow keys always work; the letter keys come from the Keys menu.
@@ -139,7 +141,7 @@ let grid, coins, totalCoins, quota, got, gate, start, seen, player, enemies = []
 let state = 'title', stateUntil = 0, gt = 0, last = performance.now(), shake = 0, cell = 32, vw = 0, vh = 0, dpr = 1;
 let cam = {x: 0, y: 0}, invulnUntil = 0, mmDirty = true, mmScale = 3, mmLast = 0;
 const slides = new Map(); const particles = [];
-let held = [], queued = null, touchDir = null, muted = false, actx = null;
+let held = [], queued = null, pullQueued = false, touchDir = null, muted = false, actx = null;
 try { best = +localStorage.getItem('wallshove-best') || 0; muted = localStorage.getItem('wallshove-muted') === '1'; } catch(e) {}
 
 const rand = n => Math.floor(Math.random() * n);
@@ -347,6 +349,26 @@ function tryMove(dx, dy) {
   }
   if (isGate(nx, ny) && got >= quota) cleared();
 }
+// Pull: grab the block you're facing, step back, and drag it into the cell you just left.
+function tryPull() {
+  const [dx, dy] = player.dir;
+  const fx = player.x + dx, fy = player.y + dy, bx = player.x - dx, by = player.y - dy;
+  if (grid[fy][fx] !== 1 || isGate(player.x, player.y)) { player.grab = {t0: gt, ok: false}; sfx(90, 0.05, 'square', 0.025); return false; }
+  if (grid[by][bx] !== 0) { player.grab = {t0: gt, ok: false}; bump(-dx, -dy); return false; }
+  grid[fy][fx] = 0; grid[player.y][player.x] = 1; mmDirty = true;
+  slides.delete(key(fx, fy));
+  slides.set(key(player.x, player.y), {fx, fy, t0: gt});
+  enemies.forEach(e => { if (e.chewing && e.chewing[0] === fx && e.chewing[1] === fy) { e.chewing = null; e.chew = 0; } });
+  moveEnt(player, bx, by); player.dir = [dx, dy]; reveal();
+  player.grab = {t0: gt, ok: true};
+  burst(fx - dx * 0.1, fy - dy * 0.1, C['block-hi'], 8, 2.2);
+  sfx(150, 0.12, 'sawtooth', 0.04, -60);
+  const k = key(bx, by);
+  if (coins.has(k)) { coins.delete(k); got++; score += 10; burst(bx, by, C.ember, 8, 3); sfx(880 + Math.min(got, 40) * 10, 0.06, 'square', 0.035);
+    if (got === quota) { flash('The gate is lit', 'good', 1600); sfx(392, 0.12, 'square', 0.04, 400); buzz(60); } hud(); }
+  if (isGate(bx, by) && got >= quota) cleared();
+  return true;
+}
 function bump(dx, dy) { player.bump = {dx, dy, t0: gt}; sfx(70, 0.05, 'square', 0.03); }
 
 function squash(e) {
@@ -366,7 +388,7 @@ function respawn(e) {
 function respawnPlayer() {
   const {x, y} = start;
   if (grid[y][x] === 1) { grid[y][x] = 0; slides.delete(key(x, y)); }
-  moveEnt(player, x, y); player.px = x; player.py = y; player.next = gt + 200; player.bump = null;
+  moveEnt(player, x, y); player.px = x; player.py = y; player.next = gt + 200; player.bump = null; player.grab = null; pullQueued = false;
   enemies.forEach(e => {
     if (e.dead || Math.abs(e.x - x) + Math.abs(e.y - y) > 12) return;
     const [nx, ny] = farCell(16, null); e.x = e.px = nx; e.y = e.py = ny; e.chase = false; e.chew = 0; e.chewing = null; e.next = gt + 900;
@@ -420,12 +442,12 @@ function titleScreen() {
     <ul class="rules">
       <li><i class="sw ember"></i><span>Collect enough embers to light the exit gate, then find it. The counter up top shows how many you need.</span></li>
       <li><i class="sw gate"></i><span>The gate is on the far side of the maze. Once it's lit, an arrow on the screen edge points to it.</span></li>
-      <li><i class="sw block"></i><span>Walk into a sandstone block to shove it one cell. Dark stone never moves.</span></li>
+      <li><i class="sw block"></i><span>Walk into a sandstone block to shove it one cell. Face one and press <b class="kb">${keyName(binds.pull)}</b><b class="touch">Pull</b> to drag it back toward you. Dark stone never moves.</span></li>
       <li><i class="sw hunter"></i><span>Hunters roam until they catch your scent. Red ones chase you, violet ones cut you off. Shove a block onto one to flatten it.</span></li>
       <li><i class="sw fixed"></i><span>Wall yourself in and they chew through the sandstone.</span></li>
     </ul>
     <div class="row"><button class="go" data-act="go" type="button">Enter the maze</button></div>
-    <div class="keys">${BUILD.startsWith('__') ? '' : `<span>Build ${BUILD}</span><br>`}<span class="kb"><kbd>Enter</kbd> to start · <kbd>←↑↓→</kbd> or <kbd>${['up','left','down','right'].map(a => keyName(binds[a])).join('')}</kbd> to move · <kbd>${keyName(binds.pause)}</kbd> pause · change them under Keys</span><span class="touch">Drag anywhere on the maze, or use the pad, to move.</span></div>`);
+    <div class="keys">${BUILD.startsWith('__') ? '' : `<span>Build ${BUILD}</span><br>`}<span class="kb"><kbd>Enter</kbd> to start · <kbd>←↑↓→</kbd> or <kbd>${['up','left','down','right'].map(a => keyName(binds[a])).join('')}</kbd> to move · <kbd>${keyName(binds.pull)}</kbd> pull · <kbd>${keyName(binds.pause)}</kbd> pause · change them under Keys</span><span class="touch">Drag anywhere on the maze, or use the pad, to move.</span></div>`);
 }
 let keysPrev = null, listening = null;
 function openKeys() {
@@ -517,8 +539,8 @@ function loop(now) {
   if (state === 'play') {
     gt += dt;
     if (gt >= player.next) {
-      const d = currentDir();
-      if (d) { tryMove(d[0], d[1]); player.next = gt + PLAYER_STEP; }
+      if (pullQueued) { pullQueued = false; tryPull(); player.next = gt + PLAYER_STEP * 1.25; }
+      else { const d = currentDir(); if (d) { tryMove(d[0], d[1]); player.next = gt + PLAYER_STEP; } }
     }
     for (const e of enemies) {
       if (e.dead) { if (gt >= e.respawnAt) respawn(e); continue; }
@@ -627,6 +649,26 @@ function drawPlayer() {
   ctx.globalAlpha = 0.18; ctx.fillStyle = C.hero; ctx.beginPath(); ctx.arc(cx, cy, r * 1.7, 0, Math.PI * 2); ctx.fill(); ctx.globalAlpha = 1;
   ctx.fillStyle = C.hero; ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.fill();
   const [dx, dy] = player.dir;
+  if (player.grab) {
+    const t = gt - player.grab.t0, life = player.grab.ok ? 300 : 160;
+    if (t < life) {
+      const reach = player.grab.ok ? 1 : Math.sin(t / life * Math.PI);
+      ctx.globalAlpha = t < life - 90 ? 1 : (life - t) / 90;
+      ctx.strokeStyle = C.hero; ctx.fillStyle = C.hero; ctx.lineCap = 'round'; ctx.lineWidth = Math.max(2, c * 0.1);
+      const px = -dy, py = dx;   // perpendicular, for the two arms
+      for (const side of [-1, 1]) {
+        const sx = cx + dx * r * 0.7 + px * side * r * 0.55, sy = cy + dy * r * 0.7 + py * side * r * 0.55;
+        const hx = cx + dx * c * (0.42 + 0.2 * reach) + px * side * r * 0.5, hy = cy + dy * c * (0.42 + 0.2 * reach) + py * side * r * 0.5;
+        ctx.beginPath(); ctx.moveTo(sx, sy); ctx.lineTo(hx, hy); ctx.stroke();
+        ctx.beginPath(); ctx.arc(hx, hy, c * 0.09, 0, Math.PI * 2); ctx.fill();
+      }
+      if (player.grab.ok && t < 140) {   // strain lines behind you
+        ctx.lineWidth = Math.max(1, c * 0.04); ctx.globalAlpha *= 0.7;
+        for (const o of [-0.3, 0, 0.3]) { ctx.beginPath(); ctx.moveTo(cx - dx * r * 1.25 + px * o * c, cy - dy * r * 1.25 + py * o * c); ctx.lineTo(cx - dx * r * 1.7 + px * o * c, cy - dy * r * 1.7 + py * o * c); ctx.stroke(); }
+      }
+      ctx.globalAlpha = 1;
+    } else player.grab = null;
+  }
   for (const side of [-1, 1]) {
     const ex = cx + (dy ? side * r * 0.36 : dx * r * 0.3), ey = cy + (dx ? side * r * 0.3 - r * 0.1 : dy * r * 0.3 - r * 0.05);
     ctx.fillStyle = C.fg; ctx.beginPath(); ctx.arc(ex, ey, r * 0.24, 0, Math.PI * 2); ctx.fill();
@@ -783,6 +825,7 @@ window.addEventListener('keydown', e => {
     } else if (k === 'escape') { e.preventDefault(); closeKeys(); }
     return;
   }
+  if (k === binds.pull && state === 'play') { e.preventDefault(); if (!e.repeat) pullQueued = true; return; }
   if (KEYS[k]) {
     e.preventDefault();
     if (state === 'title' || state === 'over') { newGame(); }
@@ -806,6 +849,9 @@ document.querySelectorAll('#pad button').forEach(b => {
   });
   ['pointerup', 'pointercancel', 'lostpointercapture'].forEach(t => b.addEventListener(t, up));
 });
+
+$('pullBtn').addEventListener('pointerdown', ev => { ev.preventDefault(); ev.stopPropagation(); if (state === 'play') pullQueued = true; $('pullBtn').classList.add('on'); });
+['pointerup', 'pointercancel', 'pointerleave'].forEach(t => $('pullBtn').addEventListener(t, () => $('pullBtn').classList.remove('on')));
 
 // Drag anywhere on the maze: the direction you drag is the direction you walk, for as long as you hold.
 let drag = null;
