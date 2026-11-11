@@ -11,7 +11,7 @@ The app opens the live game from GitHub Pages, so every push here reaches the ph
 
 ## Controls
 
-- Keyboard: arrows or WASD to move, P or Esc to pause.
+- Keyboard: arrows or ZQSD to move (AZERTY default), P or Esc to pause. The **Keys** button next to Pause lets you rebind them or switch to WASD.
 - Touch: drag anywhere on the maze in the direction you want to walk, or use the pad. Android back button pauses.
 
 ## Layout

@@ -30,6 +30,14 @@ body{background:var(--bg);color:var(--fg);font-family:var(--mono);overflow:hidde
 .pips{display:flex;gap:4px;align-items:center;height:17px}
 .pips i{width:10px;height:10px;border-radius:50%;background:var(--hero);display:block}
 .pips i.gone{background:transparent;box-shadow:inset 0 0 0 2px var(--line)}
+.menus{display:flex;gap:6px}
+.binds{display:flex;flex-direction:column;gap:6px;margin:0;padding:0;list-style:none}
+.binds li{display:flex;align-items:center;justify-content:space-between;gap:12px;font-size:13px}
+.bind{min-width:118px;font-family:var(--mono);font-size:13px;font-weight:600;background:var(--bg);color:var(--fg);border:1px solid var(--line);border-bottom-width:3px;border-radius:6px;padding:7px 10px;cursor:pointer;text-align:center}
+.bind:hover{border-color:var(--muted)}
+.bind.wait{color:var(--ember);border-color:var(--ember);font-weight:400}
+.bind:focus-visible{outline:2px solid var(--hero);outline-offset:3px}
+.note{font-size:12px;color:var(--muted);line-height:1.5;margin:0}
 .menu{font-family:var(--mono);font-size:12px;background:transparent;color:var(--fg);border:1px solid var(--line);border-radius:6px;padding:6px 10px;cursor:pointer}
 .stage{flex:1;min-height:0;position:relative;touch-action:none;overflow:hidden}
 #cv{position:absolute;inset:0;width:100%;height:100%;display:block}
@@ -83,7 +91,7 @@ kbd{font-family:var(--mono);font-size:11px;border:1px solid var(--line);border-b
       <div><dt>Lives</dt><dd id="hLives" class="pips"></dd></div>
       <div><dt>Best</dt><dd id="hBest">0</dd></div>
     </dl>
-    <button class="menu" id="pause" type="button">Pause</button>
+    <div class="menus"><button class="menu kb" id="keysBtn" type="button">Keys</button><button class="menu" id="pause" type="button">Pause</button></div>
   </header>
 
   <main class="stage" id="stage">
@@ -104,8 +112,19 @@ kbd{font-family:var(--mono);font-size:11px;border:1px solid var(--line);border-b
 (() => {
 const BUILD = '__BUILD__';
 const DIRS = [[1,0],[-1,0],[0,1],[0,-1]];
-const KEYS = {arrowup:[0,-1],w:[0,-1],arrowdown:[0,1],s:[0,1],arrowleft:[-1,0],a:[-1,0],arrowright:[1,0],d:[1,0],
-  'pad-up':[0,-1],'pad-down':[0,1],'pad-left':[-1,0],'pad-right':[1,0]};
+const MOVES = {up: [0,-1], left: [-1,0], down: [0,1], right: [1,0]};
+const ACTIONS = [['up', 'Move up'], ['left', 'Move left'], ['down', 'Move down'], ['right', 'Move right'], ['pause', 'Pause']];
+const PRESETS = {azerty: {up: 'z', left: 'q', down: 's', right: 'd', pause: 'p'}, qwerty: {up: 'w', left: 'a', down: 's', right: 'd', pause: 'p'}};
+let binds = {...PRESETS.azerty};
+try { const saved = JSON.parse(localStorage.getItem('wallshove-keys') || 'null'); if (saved && ACTIONS.every(([a]) => typeof saved[a] === 'string')) binds = saved; } catch(e) {}
+let KEYS = {};
+function buildKeys() {
+  // Arrow keys always work; the letter keys come from the Keys menu.
+  KEYS = {arrowup:[0,-1], arrowdown:[0,1], arrowleft:[-1,0], arrowright:[1,0], 'pad-up':[0,-1], 'pad-down':[0,1], 'pad-left':[-1,0], 'pad-right':[1,0]};
+  for (const a in MOVES) KEYS[binds[a]] = MOVES[a];
+}
+buildKeys();
+const keyName = k => k === ' ' ? 'Space' : k.length === 1 ? k.toUpperCase() : k[0].toUpperCase() + k.slice(1);
 const PLAYER_STEP = 120, SLIDE = 110, CHEW = 5, SQUASH_MS = 6000, INVULN = 2000, REVEAL = 6;
 const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
 
@@ -390,7 +409,7 @@ function togglePause() {
     showOverlay(`<h2>Paused</h2><p>Floor ${level}: ${got} of ${quota} embers lit, ${enemies.filter(e => !e.dead).length} hunters roaming. Boxed yourself in? Go back to the start for one life.</p>
       <div class="row"><button class="go" data-act="go" type="button">Resume</button><button class="alt" data-act="restart" type="button">Back to start (−1 life)</button></div>
       <div class="row"><button class="alt" data-act="mute" type="button">${muted ? 'Sound off' : 'Sound on'}</button><button class="alt" data-act="quit" type="button">Quit to title</button></div>
-      <div class="keys kb"><kbd>P</kbd> or <kbd>Enter</kbd> to resume</div>`);
+      <div class="keys kb"><kbd>${keyName(binds.pause)}</kbd> or <kbd>Enter</kbd> to resume</div>`);
   } else if (state === 'paused') { state = 'play'; hideOverlay(); }
   $('pause').textContent = state === 'paused' ? 'Resume' : 'Pause';
 }
@@ -406,9 +425,40 @@ function titleScreen() {
       <li><i class="sw fixed"></i><span>Wall yourself in and they chew through the sandstone.</span></li>
     </ul>
     <div class="row"><button class="go" data-act="go" type="button">Enter the maze</button></div>
-    <div class="keys">${BUILD.startsWith('__') ? '' : `<span>Build ${BUILD}</span><br>`}<span class="kb"><kbd>Enter</kbd> to start · <kbd>←↑↓→</kbd> or <kbd>WASD</kbd> to move · <kbd>P</kbd> pause</span><span class="touch">Drag anywhere on the maze, or use the pad, to move.</span></div>`);
+    <div class="keys">${BUILD.startsWith('__') ? '' : `<span>Build ${BUILD}</span><br>`}<span class="kb"><kbd>Enter</kbd> to start · <kbd>←↑↓→</kbd> or <kbd>${['up','left','down','right'].map(a => keyName(binds[a])).join('')}</kbd> to move · <kbd>${keyName(binds.pause)}</kbd> pause · change them under Keys</span><span class="touch">Drag anywhere on the maze, or use the pad, to move.</span></div>`);
+}
+let keysPrev = null, listening = null;
+function openKeys() {
+  if (state === 'keys') return closeKeys();
+  keysPrev = {state, html: $('overlay').hidden ? null : $('card').innerHTML};
+  state = 'keys'; held = []; renderKeys();
+}
+function renderKeys() {
+  const preset = Object.keys(PRESETS).find(p => ACTIONS.every(([a]) => PRESETS[p][a] === binds[a]));
+  showOverlay(`<h2>Keys</h2>
+    <ul class="binds">${ACTIONS.map(([a, label]) => `<li><span>${label}</span><button class="bind${listening === a ? ' wait' : ''}" data-bind="${a}" type="button">${listening === a ? 'Press a key…' : keyName(binds[a])}</button></li>`).join('')}</ul>
+    <p class="note">Click a key to change it. The arrow keys always work too, and <kbd>Esc</kbd> always pauses.</p>
+    <div class="row"><button class="alt" data-act="azerty" type="button">${preset === 'azerty' ? '✓ ' : ''}AZERTY (ZQSD)</button><button class="alt" data-act="qwerty" type="button">${preset === 'qwerty' ? '✓ ' : ''}QWERTY (WASD)</button></div>
+    <div class="row"><button class="go" data-act="keysdone" type="button">Done</button></div>`);
+  $('card').querySelectorAll('[data-bind]').forEach(b => b.addEventListener('click', () => { listening = listening === b.dataset.bind ? null : b.dataset.bind; renderKeys(); }));
+  if (listening) $('card').querySelector(`[data-bind="${listening}"]`).focus({preventScroll: true});
+}
+function setBind(action, k) {
+  const other = ACTIONS.find(([a]) => a !== action && binds[a] === k);
+  if (other) binds[other[0]] = binds[action];   // swap, so no two actions share a key
+  binds[action] = k; saveBinds();
+}
+function saveBinds() { buildKeys(); held = []; try { localStorage.setItem('wallshove-keys', JSON.stringify(binds)); } catch(e) {} }
+function closeKeys() {
+  listening = null; const prev = keysPrev || {state: 'title', html: null}; keysPrev = null;
+  if (prev.state === 'title') titleScreen();
+  else if (prev.state === 'paused' || prev.state === 'play') { state = 'play'; togglePause(); }   // land on Pause, not straight back into a chase
+  else if (prev.html) { state = prev.state; showOverlay(prev.html); }
+  else { state = prev.state; hideOverlay(); }
 }
 function onAct(act) {
+  if (act === 'azerty' || act === 'qwerty') { binds = {...PRESETS[act]}; listening = null; saveBinds(); renderKeys(); return; }
+  if (act === 'keysdone') { closeKeys(); return; }
   if (act === 'go') { if (state === 'paused') togglePause(); else if (state === 'title' || state === 'over') newGame(); }
   else if (act === 'restart') { togglePause(); lives--; hud(); if (lives <= 0) gameOver(); else respawnPlayer(); }
   else if (act === 'mute') { muted = !muted; try { localStorage.setItem('wallshove-muted', muted ? '1' : '0'); } catch(e) {} document.querySelector('[data-act="mute"]').textContent = muted ? 'Sound off' : 'Sound on'; }
@@ -725,6 +775,14 @@ function resize() {
 /* ---------- input ---------- */
 window.addEventListener('keydown', e => {
   const k = e.key.toLowerCase();
+  if (state === 'keys') {
+    if (listening) {
+      e.preventDefault();
+      if (k !== 'escape' && k !== 'enter' && k !== 'tab' && !k.startsWith('arrow') && k.length > 0 && !['shift','control','alt','meta'].includes(k)) setBind(listening, k);
+      listening = null; renderKeys();
+    } else if (k === 'escape') { e.preventDefault(); closeKeys(); }
+    return;
+  }
   if (KEYS[k]) {
     e.preventDefault();
     if (state === 'title' || state === 'over') { newGame(); }
@@ -732,7 +790,7 @@ window.addEventListener('keydown', e => {
     if (!e.repeat) queued = KEYS[k];
     return;
   }
-  if (k === 'p' || k === 'escape') { e.preventDefault(); if (state === 'play' || state === 'paused') togglePause(); return; }
+  if (k === binds.pause || k === 'escape') { e.preventDefault(); if (state === 'play' || state === 'paused') togglePause(); return; }
   if ((k === 'enter' || k === ' ') && state !== 'play' && !document.activeElement?.dataset?.act) { e.preventDefault(); onAct('go'); }
 });
 window.addEventListener('keyup', e => { const k = e.key.toLowerCase(); held = held.filter(h => h !== k); });
@@ -770,6 +828,7 @@ const endDrag = ev => { if (drag && ev.pointerId === drag.id) { drag = null; tou
 window.wallshoveBack = () => { if (state === 'play' || state === 'paused') { togglePause(); return true; } return false; };
 
 $('pause').addEventListener('click', () => { if (state === 'play' || state === 'paused') togglePause(); });
+$('keysBtn').addEventListener('click', e => { e.currentTarget.blur(); openKeys(); });
 
 new ResizeObserver(resize).observe(stage);
 resize();
