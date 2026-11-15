@@ -212,7 +212,7 @@ function startLevel(n) {
   // Start somewhere in the middle third; the gate goes to the farthest reachable cell.
   let sx, sy; do { sx = (W/3 | 0) + rand(W/3 | 0); sy = (H/3 | 0) + rand(H/3 | 0); } while (grid[sy][sx] !== 0);
   start = {x: sx, y: sy};
-  player = ent(sx, sy, PLAYER_STEP * 0.9); player.next = 0; player.bump = null; player.dir = [0, 1];
+  player = ent(sx, sy, PLAYER_STEP * 0.9); player.next = 0; player.bump = null; player.dir = [0, 1]; lastMove = null; turnBuf = null;
   const d = distField(sx, sy); let bestK = 0;
   for (let k = 0; k < d.length; k++) if (d[k] > d[bestK]) bestK = k;
   gate = {x: bestK % W, y: (bestK / W) | 0};
@@ -339,7 +339,7 @@ function tryMove(dx, dy) {
     const victim = enemies.find(e => !e.dead && e.x === bx && e.y === by);
     if (victim) squash(victim); else sfx(170, 0.07, 'triangle', 0.06, -60);
   }
-  moveEnt(player, nx, ny); reveal();
+  moveEnt(player, nx, ny); reveal(); lastMove = [dx, dy];
   const k = key(nx, ny);
   if (coins.has(k)) {
     coins.delete(k); got++; score += 10; burst(nx, ny, C.ember, 8, 3);
@@ -369,7 +369,7 @@ function tryPull() {
   if (isGate(bx, by) && got >= quota) cleared();
   return true;
 }
-function bump(dx, dy) { player.bump = {dx, dy, t0: gt}; sfx(70, 0.05, 'square', 0.03); }
+function bump(dx, dy) { lastMove = null; player.bump = {dx, dy, t0: gt}; sfx(70, 0.05, 'square', 0.03); }
 
 function squash(e) {
   e.dead = true; e.respawnAt = gt + SQUASH_MS; e.spot = farCell(16, null); e.chewing = null; e.chew = 0; e.chase = false;
@@ -388,7 +388,7 @@ function respawn(e) {
 function respawnPlayer() {
   const {x, y} = start;
   if (grid[y][x] === 1) { grid[y][x] = 0; slides.delete(key(x, y)); }
-  moveEnt(player, x, y); player.px = x; player.py = y; player.next = gt + 200; player.bump = null; player.grab = null; pullQueued = false;
+  moveEnt(player, x, y); player.px = x; player.py = y; player.next = gt + 200; player.bump = null; player.grab = null; pullQueued = false; lastMove = null; turnBuf = null;
   enemies.forEach(e => {
     if (e.dead || Math.abs(e.x - x) + Math.abs(e.y - y) > 12) return;
     const [nx, ny] = farCell(16, null); e.x = e.px = nx; e.y = e.py = ny; e.chase = false; e.chew = 0; e.chewing = null; e.next = gt + 900;
@@ -528,6 +528,43 @@ function burst(x, y, color, n, sp) {
 }
 
 /* ---------- loop ---------- */
+/* Turn buffering. Press a turn a little early, before you reach the side opening, and you
+   keep running straight until the opening is beside you, then take it. Works for a held key,
+   a quick tap and a drag. */
+const TURN_AHEAD = 2;          // how many cells ahead a buffered turn may wait for its opening
+let lastMove = null, turnBuf = null;
+const same = (a, b) => a && b && a[0] === b[0] && a[1] === b[1];
+const perp = (a, b) => a && b && a[0] * b[0] + a[1] * b[1] === 0;
+const cellAt = (x, y) => (x < 0 || y < 0 || x >= W || y >= H) ? 2 : grid[y][x];
+function canEnter(d) {   // floor, or a block that would actually move
+  const nx = player.x + d[0], ny = player.y + d[1], c = cellAt(nx, ny);
+  if (c === 0) return true;
+  if (c === 2) return false;
+  const bx = nx + d[0], by = ny + d[1];
+  return cellAt(bx, by) === 0 && !coins.has(key(bx, by)) && !isGate(bx, by);
+}
+function openingAhead(fwd, turn) {
+  for (let k = 1; k <= TURN_AHEAD; k++) {
+    const x = player.x + fwd[0] * k, y = player.y + fwd[1] * k;
+    if (cellAt(x, y) !== 0) return false;
+    if (cellAt(x + turn[0], y + turn[1]) === 0) return true;
+  }
+  return false;
+}
+function stepPlayer() {
+  let d = currentDir();
+  if (!d && turnBuf) d = turnBuf.dir;                  // a tapped turn still waiting for its opening
+  if (!d) { lastMove = null; turnBuf = null; return; }  // standing still: forget the run
+  if (turnBuf && !same(d, turnBuf.dir)) turnBuf = null;
+  if (!canEnter(d) && perp(d, lastMove) && openingAhead(lastMove, d)) {
+    turnBuf = {dir: d};
+    tryMove(lastMove[0], lastMove[1]);
+  } else {
+    turnBuf = null;
+    tryMove(d[0], d[1]);
+  }
+  player.next = gt + PLAYER_STEP;
+}
 function currentDir() {
   if (queued) { const q = queued; queued = null; return q; }
   if (touchDir) return touchDir;
@@ -540,7 +577,7 @@ function loop(now) {
     gt += dt;
     if (gt >= player.next) {
       if (pullQueued) { pullQueued = false; tryPull(); player.next = gt + PLAYER_STEP * 1.25; }
-      else { const d = currentDir(); if (d) { tryMove(d[0], d[1]); player.next = gt + PLAYER_STEP; } }
+      else stepPlayer();
     }
     for (const e of enemies) {
       if (e.dead) { if (gt >= e.respawnAt) respawn(e); continue; }
